@@ -1,0 +1,10 @@
+# Build options for the proxy project
+# Note: buildtype and b_coverage are Meson built-in options and are
+# configured via `meson setup -Dbuildtype=release -Db_coverage=true`
+
+option('log_default_level',
+  type        : 'combo',
+  choices     : ['trace', 'debug', 'info', 'warn', 'error'],
+  value       : 'info',
+  description : 'Default log level compiled into the binary (can be overridden at runtime)',
+)

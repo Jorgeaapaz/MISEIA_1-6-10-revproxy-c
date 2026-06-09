@@ -663,3 +663,176 @@ Set-AuthenticodeSignature -FilePath .\run_loadtest.ps1 -Certificate $cert
 2. **Ejercitar `platform/epoll.c`** — compilar y ejecutar todos los tests en Linux nativo o WSL2
 3. **Aumentar backlog de `mock_server`** — pasar de `listen(64)` a `listen(1024)` y hacer multihilo para soportar benchmarks de mayor concurrencia
 4. **Implementar TLS** — usar mbedTLS o OpenSSL como subproyecto wrap
+
+---
+
+---
+
+# Sesión 3 — 2026-06-08
+### Documentación técnica: mock_server, cadena de llamadas del load test, y guía de ejecución
+
+---
+
+## Resumen / Overview
+
+Sesión de análisis y documentación. No se modificó código. Se explicó en detalle cómo funciona el `mock_server`, cómo se articula la cadena de llamadas completa en el load test, y se creó el fichero `RUN_PROJECT_AND_TEST.md` con instrucciones paso a paso para ejecutar y testear el proyecto en Windows.
+
+**Lo que se logró:**
+- Análisis del código fuente de `tests/mock_server.c`
+- Explicación de la cadena completa: `Start-Job` → `HttpWebRequest` → `proxy.exe` → `mock_server.exe`
+- Creación del fichero `RUN_PROJECT_AND_TEST.md`
+
+---
+
+## Qué hace mock_server / What mock_server does
+
+`mock_server` (`tests/mock_server.c`) es un servidor HTTP/1.1 mínimo de un solo fichero. Toma dos argumentos: `<port>` y `<name>`.
+
+**Arranque:** hace `bind` + `listen` (backlog 64) en `127.0.0.1:<port>`. El bucle principal es un `accept()` síncrono — acepta una conexión, la atiende completamente, y sólo entonces acepta la siguiente (single-threaded).
+
+**Por cada conexión (`handle_client`):**
+
+1. **Lee la petición** — drena bytes en un buffer de 4 KB hasta encontrar `\r\n\r\n` (fin de cabeceras HTTP). No parsea nada: método, path y cabeceras se descartan.
+2. **Envía siempre la misma respuesta** — `200 OK` con el `<name>` como cuerpo en texto plano:
+
+```
+HTTP/1.1 200 OK
+Content-Type: text/plain
+Content-Length: <len>
+Connection: close
+
+backend-api-1        ← el nombre pasado por argumento
+```
+
+3. **Cierra la conexión** inmediatamente (`Connection: close`, sin keep-alive).
+
+**Por qué es suficiente para los tests:** el `<name>` en el cuerpo es la única cosa que verifican los scripts de integración y load test. Si la respuesta contiene `"backend"`, significa que el proxy enrutó correctamente la petición hasta un mock server real y recibió su respuesta.
+
+**Limitaciones clave:**
+- **Single-threaded** — una conexión a la vez; el siguiente cliente espera en el backlog del SO.
+- **Sin keep-alive** — cada petición abre y cierra una conexión TCP nueva.
+- **Backlog = 64** — por encima de ~30 clientes simultáneos el backlog se satura, lo que causa fallos de conexión. Por eso el load test usa `-Concurrency 20` como máximo seguro.
+
+---
+
+## Los mock_server son los backends a los que el proxy enruta / mock_servers are the routing targets
+
+Los mock_server **son** los backends a los que el proxy enruta. No son mocks del proxy — son los servidores de destino que el proxy selecciona según la cabecera `Host:`.
+
+La cadena completa:
+
+```
+curl (cliente)
+    │
+    │  HTTP GET  Host: api.test
+    ▼
+proxy.exe  (puerto 8080)
+    │
+    │  lee cabecera Host → "api.test"
+    │  busca en proxy.toml → backends: ["127.0.0.1:9001", "127.0.0.1:9002"]
+    │  selecciona backend por round-robin
+    ▼
+mock_server.exe  (puerto 9001 ó 9002)
+    │
+    │  HTTP/1.1 200 OK  body: "backend-api-1"
+    ▼
+proxy.exe  (reenvía la respuesta al cliente)
+    │
+    ▼
+curl  ← ve "backend-api-1" ó "backend-api-2"
+```
+
+Los dos backends de `api.test` en `proxy.toml`:
+```toml
+[[route]]
+domain   = "api.test"
+backends = ["127.0.0.1:9001", "127.0.0.1:9002"]
+```
+Son exactamente los dos procesos `mock_server.exe 9001 backend-api-1` y `mock_server.exe 9002 backend-api-2`. El proxy abre una conexión TCP al backend seleccionado, canaliza la petición del cliente a través de él, y devuelve la respuesta. El mock server es la cosa más simple posible que puede estar al otro lado y demostrar que el enrutamiento funciona.
+
+---
+
+## Cadena de llamadas del Load Test / Load Test Call Chain
+
+### La cadena completa
+
+```
+Start-Job (proceso hijo PowerShell)
+    │
+    │  HttpWebRequest GET http://127.0.0.1:8091/ping
+    │  Host: load.test
+    ▼
+proxy.exe  (puerto 8091)
+    │
+    │  lee Host → "load.test"
+    │  busca ruta → backends 9101/9102/9103/9104
+    │  round-robin → selecciona siguiente backend
+    ▼
+mock_server.exe  (puerto 9101, 9102, 9103 ó 9104)
+    │
+    │  HTTP/1.1 200 OK  body: "backend-9101"
+    ▼
+proxy.exe  (reenvía la respuesta)
+    │
+    ▼
+HttpWebRequest ← lee body, verifica que contiene "backend"
+```
+
+Los jobs **nunca hablan directamente con los mock servers**. Sólo conocen `127.0.0.1:8091` (el proxy). Las direcciones de los mock servers (`9101`–`9104`) sólo aparecen en `proxy_loadtest.toml`, que el proxy lee.
+
+### Cómo funciona `Start-Job`
+
+`Start-Job` (línea 110 de `run_loadtest.ps1`) lanza un **proceso hijo `powershell.exe` separado** por cada worker:
+
+```powershell
+$jobs = 1..$Concurrency | ForEach-Object {
+    Start-Job -ScriptBlock $workerBlock -ArgumentList $url, $perWorker
+}
+```
+
+- `1..$Concurrency` genera los números 1–20, uno por worker.
+- Cada iteración llama a `Start-Job`, que hace fork de un nuevo proceso `powershell.exe`.
+- El proceso hijo recibe `$workerBlock` (el código a ejecutar) y dos argumentos: la URL y cuántas peticiones hacer (`$perWorker = 500 / 20 = 25`).
+- Los 20 procesos corren simultáneamente, cada uno haciendo sus 25 peticiones de forma independiente.
+- El padre bloquea en `Wait-Job` hasta que todos los hijos terminan, recoge su salida con `Receive-Job`, y suma los resultados.
+
+**Por qué `Start-Job` y no `RunspacePool`:** `ServicePointManager.DefaultConnectionLimit` tiene valor por defecto **2 conexiones por host por proceso** en .NET Framework. Con un RunspacePool, todos los threads comparten un proceso → sólo 2 podían conectarse simultáneamente → 364/500 peticiones fallaban por timeout. Con `Start-Job` cada proceso hijo tiene su propio límite de 2, así que 20 procesos = 40 conexiones simultáneas totales → 500/500 éxitos.
+
+### Cómo funciona `HttpWebRequest` dentro de cada job
+
+Cada worker ejecuta este bucle (`$workerBlock`, líneas 89–107):
+
+```powershell
+$req = [System.Net.HttpWebRequest]::Create("http://127.0.0.1:8091/ping")
+$req.Host    = "load.test"   # sobreescribe la cabecera Host
+$req.Method  = "GET"
+$req.Timeout = 10000         # 10 s de timeout
+
+$r = $req.GetResponse()      # envía la petición, bloquea hasta recibir respuesta
+$b = [System.IO.StreamReader]::new($r.GetResponseStream()).ReadToEnd()
+$r.Close()
+
+if ($b -match "backend") { $ok++ } else { $fail++ }
+```
+
+Puntos clave:
+- La URL contiene `127.0.0.1:8091` — es el **proxy**, no un mock server.
+- `$req.Host = "load.test"` sobreescribe la cabecera `Host:`. Sin esto, la cabecera sería `127.0.0.1:8091` y el proxy devolvería 502 (sin ruta coincidente).
+- `GetResponse()` es **síncrono y bloqueante** — dentro de cada job las 25 peticiones van una tras otra, no en paralelo. La concurrencia viene de tener 20 jobs corriendo a la vez, no de I/O asíncrono dentro de un job.
+- La única aserción es que el cuerpo de la respuesta contenga la cadena `"backend"` (por ejemplo `"backend-9101"`), lo que prueba que el proxy enrutó la petición a través de un mock server y recibió una respuesta real.
+
+### Limitación de medición de latencia
+
+`HttpWebRequest` añade ~1–5 ms de overhead de .NET por llamada, lo que enmascara la latencia real del proxy (sub-milisegundo). Para medir p99 con precisión hay que usar `wrk` o `ab` desde WSL2:
+
+```bash
+wrk -t4 -c100 -d30s -H 'Host: load.test' http://127.0.0.1:8091/ping
+```
+
+---
+
+## Fichero creado en esta sesión / File created
+
+| Fichero | Descripción |
+|---------|-------------|
+| `RUN_PROJECT_AND_TEST.md` | Guía completa paso a paso para compilar, ejecutar y testear el proxy en Windows (IOCP). Cubre: prereqs, PATH, build con MSYS2 bash, tests unitarios, ejecución manual, recarga dinámica, tests de integración, load test, troubleshooting, limitaciones conocidas. |

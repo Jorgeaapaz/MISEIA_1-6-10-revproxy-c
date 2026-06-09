@@ -254,3 +254,10 @@ bash tests/run_integration.sh
 ## License
 
 MIT
+
+---
+
+## Updates — 2026-06-08
+
+- **`RUN_PROJECT_AND_TEST.md`** — new file: complete step-by-step guide for building, running, and testing the proxy on Windows (IOCP backend). Covers prerequisites, PATH setup, MSYS2 bash compile workflow, unit tests, manual proxy run, dynamic config reload, integration tests, load test, troubleshooting table, and known limitations.
+- **`RETROSPECTIVA-2026-05-02.md`** — added Sesión 3 section documenting: what `mock_server` does (single-threaded HTTP echo server, `Connection: close`, name-in-body assertion pattern), the mock servers' role as the actual routing targets, the full `Start-Job → HttpWebRequest → proxy.exe → mock_server.exe` call chain, the `ServicePointManager.DefaultConnectionLimit` problem and why `Start-Job` (separate processes) was chosen over `RunspacePool`, and the p99 latency measurement limitation with `HttpWebRequest`.

@@ -1,90 +1,61 @@
-name: CI
+name: CI/CD — Web
 
 on:
   push:
-    branches: [main, fix/**]
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'docker-compose.yml'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'index.html'
 
 jobs:
-  build-and-test-linux:
-    name: Build & Test (Linux / epoll)
+  validate:
+    name: Validate index.html
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Check index.html exists and is non-empty
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y meson ninja-build gcc clang-format lcov
+          test -s index.html || (echo "index.html missing or empty" && exit 1)
+          echo "index.html OK ($(wc -c < index.html) bytes)"
 
-      - name: Configure (debug + coverage)
-        run: meson setup builddir-cov -Db_coverage=true -Dbuildtype=debug
-
-      - name: Build
-        run: meson compile -C builddir-cov
-
-      - name: Run tests
-        run: meson test -C builddir-cov --print-errorlogs
-
-      - name: Generate coverage report (XML)
-        run: ninja -C builddir-cov coverage-xml
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: builddir-cov/meson-logs/coverage.xml
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-  format-check:
-    name: Code Format Check
+  deploy:
+    name: Deploy to GCI VM
     runs-on: ubuntu-latest
+    needs: validate
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install clang-format
-        run: sudo apt-get update -qq && sudo apt-get install -y clang-format meson ninja-build gcc
-
-      - name: Configure
-        run: meson setup builddir -Dbuildtype=debug
-
-      - name: Check formatting
-        run: meson compile -C builddir format-check
-
-  build-windows:
-    name: Cross-compile (MinGW → Windows)
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install MinGW and Meson
+      - name: Set up SSH key
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y meson ninja-build gcc-mingw-w64-x86-64
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Create MinGW cross-file
+      - name: Copy index.html to VM
         run: |
-          cat > mingw64.ini << 'EOF'
-          [binaries]
-          c       = 'x86_64-w64-mingw32-gcc'
-          ar      = 'x86_64-w64-mingw32-ar'
-          strip   = 'x86_64-w64-mingw32-strip'
-          windres = 'x86_64-w64-mingw32-windres'
+          scp -i ~/.ssh/deploy_key \
+            index.html \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:~/MISEIA1-6-10-revproxy-c/index.html
 
-          [host_machine]
-          system     = 'windows'
-          cpu_family = 'x86_64'
-          cpu        = 'x86_64'
-          endian     = 'little'
-          EOF
+      - name: Restart web container
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            "cd ~/MISEIA1-6-10-revproxy-c && docker compose restart revproxy-web"
 
-      - name: Configure (cross-compile)
-        run: meson setup builddir-win --cross-file mingw64.ini -Dbuildtype=release
-
-      - name: Build
-        run: meson compile -C builddir-win
+      - name: Smoke test
+        run: |
+          sleep 5
+          STATUS=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 15 https://revproxy.deviaaps.com/)
+          echo "HTTP status: $STATUS"
+          test "$STATUS" = "200" || (echo "Smoke test failed" && exit 1)

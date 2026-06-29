@@ -240,6 +240,30 @@ bash tests/run_integration.sh
 .\tests\run_integration.ps1
 ```
 
+### Docker Deploy
+
+```bash
+# Build the image
+docker build -t proxy-epoll-iocp:latest .
+
+# Run with your config
+docker run -d \
+  --name revproxy \
+  -p 8080:8080 \
+  -v $(pwd)/proxy.toml:/app/proxy.toml:ro \
+  proxy-epoll-iocp:latest
+
+# Deploy to GCI VM (requires SSH access)
+docker save proxy-epoll-iocp:latest | \
+  ssh -i ~/.ssh/vboxuser gcvmuser@34.174.56.186 "docker load"
+
+ssh -i ~/.ssh/vboxuser gcvmuser@34.174.56.186 \
+  "docker run -d --name revproxy --restart=unless-stopped \
+   --network miseia-net \
+   -v ~/proxy.toml:/app/proxy.toml:ro \
+   proxy-epoll-iocp:latest"
+```
+
 ---
 
 ## Example Output

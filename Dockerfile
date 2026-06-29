@@ -19,7 +19,7 @@ RUN apt-get update -qq && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY --from=builder /src/builddir/proxy /app/proxy
+COPY --from=builder /src/builddir/src/proxy /app/proxy
 COPY proxy.toml.example /app/proxy.toml
 
 EXPOSE 8080

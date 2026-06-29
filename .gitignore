@@ -47,6 +47,7 @@ compile_commands.json
 
 # Environment / secrets
 .env
+docs/compliance/env.production
 
 # OS artifacts
 .DS_Store

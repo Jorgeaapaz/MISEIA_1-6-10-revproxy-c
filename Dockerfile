@@ -24,4 +24,4 @@ COPY proxy.toml.example /app/proxy.toml
 
 EXPOSE 8080
 
-ENTRYPOINT ["/app/proxy", "/app/proxy.toml"]
+ENTRYPOINT ["/app/proxy", "--config", "/app/proxy.toml"]

@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main, fix/**]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test-linux:
+    name: Build & Test (Linux / epoll)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y meson ninja-build gcc clang-format lcov
+
+      - name: Configure (debug + coverage)
+        run: meson setup builddir-cov -Db_coverage=true -Dbuildtype=debug
+
+      - name: Build
+        run: meson compile -C builddir-cov
+
+      - name: Run tests
+        run: meson test -C builddir-cov --print-errorlogs
+
+      - name: Generate coverage report (XML)
+        run: ninja -C builddir-cov coverage-xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: builddir-cov/meson-logs/coverage.xml
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  format-check:
+    name: Code Format Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: sudo apt-get update -qq && sudo apt-get install -y clang-format meson ninja-build gcc
+
+      - name: Configure
+        run: meson setup builddir -Dbuildtype=debug
+
+      - name: Check formatting
+        run: meson compile -C builddir format-check
+
+  build-windows:
+    name: Cross-compile (MinGW → Windows)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MinGW and Meson
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y meson ninja-build gcc-mingw-w64-x86-64
+
+      - name: Create MinGW cross-file
+        run: |
+          cat > mingw64.ini << 'EOF'
+          [binaries]
+          c       = 'x86_64-w64-mingw32-gcc'
+          ar      = 'x86_64-w64-mingw32-ar'
+          strip   = 'x86_64-w64-mingw32-strip'
+          windres = 'x86_64-w64-mingw32-windres'
+
+          [host_machine]
+          system     = 'windows'
+          cpu_family = 'x86_64'
+          cpu        = 'x86_64'
+          endian     = 'little'
+          EOF
+
+      - name: Configure (cross-compile)
+        run: meson setup builddir-win --cross-file mingw64.ini -Dbuildtype=release
+
+      - name: Build
+        run: meson compile -C builddir-win

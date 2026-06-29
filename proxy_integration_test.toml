@@ -1,0 +1,21 @@
+[global]
+workers = 2
+connect_timeout_ms = 5000
+read_timeout_ms = 10000
+log_level = "debug"
+
+[[listener]]
+port = 8080
+tls = false
+
+[[route]]
+domain = "api.test"
+backends = ["127.0.0.1:9001", "127.0.0.1:9002"]
+
+[[route]]
+domain = "web.test"
+backends = ["127.0.0.1:9003"]
+
+[[route]]
+domain = "admin.test"
+backends = ["127.0.0.1:9005", "127.0.0.1:9006"]

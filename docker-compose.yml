@@ -1,0 +1,24 @@
+# nginx:alpine serving index.html behind Traefik v3.3
+# Network miseia-net is owned by the infra docker-compose — declared as external.
+# TLS terminated at Traefik using the cloudflare DNS-01 wildcard cert (*.deviaaps.com).
+
+networks:
+  miseia-net:
+    external: true
+
+services:
+  revproxy-web:
+    image: nginx:alpine
+    container_name: revproxy-web
+    restart: unless-stopped
+    volumes:
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.revproxy-web.rule=Host(`revproxy.deviaaps.com`)"
+      - "traefik.http.routers.revproxy-web.entrypoints=websecure"
+      - "traefik.http.routers.revproxy-web.tls=true"
+      - "traefik.http.routers.revproxy-web.tls.certresolver=cloudflare"
+      - "traefik.http.services.revproxy-web-svc.loadbalancer.server.port=80"
+    networks:
+      - miseia-net

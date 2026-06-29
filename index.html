@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>proxy-epoll-iocp — High-Performance Reverse Proxy in C</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --border:    #30363d;
+      --accent:    #58a6ff;
+      --accent2:   #f78166;
+      --green:     #3fb950;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --mono:      'Courier New', Courier, monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      line-height: 1.7;
+      padding: 0 1rem;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .container {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 3rem 0 5rem;
+    }
+
+    /* ── Header ── */
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 2rem;
+      margin-bottom: 2.5rem;
+    }
+
+    .badge-row {
+      display: flex;
+      gap: .5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1.2rem;
+    }
+
+    .badge {
+      font-size: .72rem;
+      padding: .18rem .6rem;
+      border-radius: 2rem;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--muted);
+      letter-spacing: .04em;
+    }
+
+    .badge.lang  { border-color: #555; color: #f0a; }
+    .badge.build { border-color: var(--border); color: var(--green); }
+    .badge.plat  { border-color: var(--border); color: var(--accent); }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -.01em;
+    }
+
+    h1 span { color: var(--accent); }
+
+    .tagline {
+      margin-top: .55rem;
+      color: var(--muted);
+      font-size: .95rem;
+    }
+
+    /* ── Sections ── */
+    section {
+      margin-bottom: 2.8rem;
+    }
+
+    h2 {
+      font-size: 1.05rem;
+      color: var(--accent);
+      border-left: 3px solid var(--accent);
+      padding-left: .65rem;
+      margin-bottom: 1rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    p { color: var(--muted); font-size: .92rem; margin-bottom: .6rem; }
+
+    /* ── Architecture diagram ── */
+    .arch {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1.2rem 1.5rem;
+      font-size: .82rem;
+      color: #cdd9e5;
+      white-space: pre;
+      overflow-x: auto;
+    }
+
+    /* ── Features list ── */
+    ul.features {
+      list-style: none;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: .55rem;
+    }
+
+    ul.features li {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: .5rem .85rem;
+      font-size: .88rem;
+      color: var(--text);
+    }
+
+    ul.features li::before {
+      content: '▸ ';
+      color: var(--green);
+    }
+
+    /* ── Repo buttons ── */
+    .repo-links {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-top: .4rem;
+    }
+
+    .repo-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: .55rem;
+      padding: .6rem 1.2rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: .88rem;
+      text-decoration: none;
+      transition: border-color .15s, background .15s;
+    }
+
+    .repo-btn:hover { border-color: var(--accent); background: #1c2430; text-decoration: none; }
+
+    .repo-btn .icon {
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+
+    .repo-btn.github .icon { fill: #e6edf3; }
+    .repo-btn.gitlab .icon { fill: #fc6d26; }
+
+    /* ── Tech stack ── */
+    .stack {
+      display: flex;
+      gap: .5rem;
+      flex-wrap: wrap;
+    }
+
+    .tech {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: .28rem .75rem;
+      font-size: .82rem;
+      color: var(--accent2);
+    }
+
+    /* ── Code block ── */
+    pre {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1.1rem 1.4rem;
+      font-size: .83rem;
+      color: #cdd9e5;
+      overflow-x: auto;
+      line-height: 1.6;
+    }
+
+    pre .comment { color: #6a737d; }
+    pre .cmd     { color: var(--green); }
+    pre .flag    { color: var(--accent); }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding-top: 1.5rem;
+      font-size: .78rem;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: .5rem;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- ── Header ── -->
+  <header>
+    <div class="badge-row">
+      <span class="badge lang">C11</span>
+      <span class="badge build">Meson</span>
+      <span class="badge plat">Linux · epoll</span>
+      <span class="badge plat">Windows · IOCP</span>
+      <span class="badge build">Layer 7</span>
+    </div>
+    <h1>proxy-<span>epoll</span>-iocp</h1>
+    <p class="tagline">High-performance Layer 7 reverse proxy in C — async I/O via epoll (Linux) and IOCP (Windows).</p>
+  </header>
+
+  <!-- ── Architecture ── -->
+  <section>
+    <h2>Architecture</h2>
+    <p>
+      The proxy listens on one or more ports. Each incoming connection is dispatched by an event loop
+      (epoll on Linux, IOCP on Windows) without blocking threads. Routing decisions are made at Layer 7
+      using the HTTP <code>Host</code> header, and upstream traffic is distributed across backend servers
+      via round-robin load balancing.
+    </p>
+    <div class="arch">
+  Client A ──┐
+  Client B ──┤──▶  [ Listener : port 8080 ]
+  Client C ──┘         │
+                        ▼
+               [ Event Loop (epoll/IOCP) ]
+                        │
+               [ Router — domain match ]
+                   /           \
+     domain-a.example.com   domain-b.example.com
+            │                       │
+    [ Balancer RR ]         [ Balancer RR ]
+      /       \                /       \
+ backend:3001  :3002    backend:4001  :4002</div>
+  </section>
+
+  <!-- ── Features ── -->
+  <section>
+    <h2>Key Features</h2>
+    <ul class="features">
+      <li>Layer 7 (HTTP) reverse proxy</li>
+      <li>Domain-based routing (Host header)</li>
+      <li>Multiple independent listen ports</li>
+      <li>Round-robin load balancing per upstream</li>
+      <li>Dynamic configuration reload (no restart)</li>
+      <li>Async I/O — epoll on Linux</li>
+      <li>Async I/O — IOCP on Windows</li>
+      <li>TOML-based configuration (proxy.toml)</li>
+      <li>Built and tested with Meson</li>
+      <li>Unit tests via Unity framework</li>
+    </ul>
+  </section>
+
+  <!-- ── Repositories ── -->
+  <section>
+    <h2>Repositories</h2>
+    <p>Source code is available on both GitHub and GitLab:</p>
+    <div class="repo-links">
+
+      <a class="repo-btn github"
+         href="https://github.com/Jorgeaapaz/MISEIA_1-6-10-revproxy-c"
+         target="_blank" rel="noopener">
+        <svg class="icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                   0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13
+                   -.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66
+                   .07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15
+                   -.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0
+                   1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56
+                   .82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07
+                   -.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+        GitHub — Jorgeaapaz/MISEIA_1-6-10-revproxy-c
+      </a>
+
+      <a class="repo-btn gitlab"
+         href="https://gitlab.codecrypto.academy/jorgeaapaz/MISEIA_1-6-10-revproxy-c"
+         target="_blank" rel="noopener">
+        <svg class="icon" viewBox="0 0 380 380" xmlns="http://www.w3.org/2000/svg">
+          <path d="M282.83 170.73l-.27-.69-26.14-68.22a6.81 6.81 0 00-2.69-3.24 7 7 0 00-8
+                   .43 7 7 0 00-2.32 3.52l-17.65 54H154.29l-17.65-54a6.86 6.86 0 00-2.32-3.52
+                   7 7 0 00-8-.43 6.87 6.87 0 00-2.69 3.24L97.44 170l-.26.69a48.54 48.54 0
+                   0016.1 56.1l.09.07.24.17 39.82 29.82 19.7 14.91 12 9.06a8.07 8.07 0 009.19
+                   0l12-9.06 19.7-14.91 40.06-30 .1-.08a48.56 48.56 0 0016.08-56.04z"/>
+        </svg>
+        GitLab — jorgeaapaz/MISEIA_1-6-10-revproxy-c
+      </a>
+
+    </div>
+  </section>
+
+  <!-- ── Tech Stack ── -->
+  <section>
+    <h2>Technology Stack</h2>
+    <div class="stack">
+      <span class="tech">C11</span>
+      <span class="tech">epoll (Linux)</span>
+      <span class="tech">IOCP (Windows)</span>
+      <span class="tech">Meson Build</span>
+      <span class="tech">Unity Test Framework</span>
+      <span class="tech">TOML Config</span>
+      <span class="tech">POSIX Sockets</span>
+      <span class="tech">Winsock2</span>
+    </div>
+  </section>
+
+  <!-- ── Quick Start ── -->
+  <section>
+    <h2>Quick Start</h2>
+    <pre><span class="comment"># Clone the repository</span>
+<span class="cmd">git clone</span> https://github.com/Jorgeaapaz/MISEIA_1-6-10-revproxy-c.git
+<span class="cmd">cd</span> MISEIA_1-6-10-revproxy-c
+
+<span class="comment"># Configure and build (Linux)</span>
+<span class="cmd">meson setup</span> <span class="flag">build</span>
+<span class="cmd">meson compile</span> <span class="flag">-C build</span>
+
+<span class="comment"># Run unit tests</span>
+<span class="cmd">meson test</span> <span class="flag">-C build</span>
+
+<span class="comment"># Start the proxy (uses proxy.toml by default)</span>
+<span class="cmd">./build/proxy</span> <span class="flag">proxy.toml</span>
+
+<span class="comment"># Reload configuration without restarting</span>
+<span class="cmd">kill</span> <span class="flag">-HUP</span> $(pgrep proxy)</pre>
+  </section>
+
+  <!-- ── Footer ── -->
+  <footer>
+    <span>proxy-epoll-iocp &mdash; MISEIA Master Project</span>
+    <span>
+      <a href="https://github.com/Jorgeaapaz/MISEIA_1-6-10-revproxy-c">GitHub</a>
+      &nbsp;·&nbsp;
+      <a href="https://gitlab.codecrypto.academy/jorgeaapaz/MISEIA_1-6-10-revproxy-c">GitLab</a>
+    </span>
+  </footer>
+
+</div>
+</body>
+</html>

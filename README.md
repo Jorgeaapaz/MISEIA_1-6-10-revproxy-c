@@ -257,6 +257,13 @@ MIT
 
 ---
 
+## Updates — 2026-06-29
+
+- **`index.html`** — new self-contained HTML landing page describing the project: architecture diagram, key features, tech stack, quick-start guide, and buttons linking to both the GitHub (`https://github.com/Jorgeaapaz/MISEIA_1-6-10-revproxy-c`) and GitLab (`https://gitlab.codecrypto.academy/jorgeaapaz/MISEIA_1-6-10-revproxy-c`) repositories. Dark terminal aesthetic, no external CDN dependencies.
+- **`docs/prompts/feature_001_html_project_page_prompt.md`** — disciplined implementation prompt (feature 001) that drove the `index.html` creation, following the project's standard prompt template.
+
+---
+
 ## Updates — 2026-06-08
 
 - **`RUN_PROJECT_AND_TEST.md`** — new file: complete step-by-step guide for building, running, and testing the proxy on Windows (IOCP backend). Covers prerequisites, PATH setup, MSYS2 bash compile workflow, unit tests, manual proxy run, dynamic config reload, integration tests, load test, troubleshooting table, and known limitations.

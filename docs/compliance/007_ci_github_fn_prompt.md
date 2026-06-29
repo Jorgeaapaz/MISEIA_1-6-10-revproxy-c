@@ -105,7 +105,7 @@ gh secret set VM_SSH_PRIVATE_KEY < "C:\ubuntuiso\.ssh\vboxuser"
 gh secret set VM_HOST --body "34.174.56.186"
 
 # Cloudflare token (for Traefik wildcard cert)
-gh secret set CF_DNS_API_TOKEN --body "cfat_npXIXQCyNmgUfVmjCIqh5HGFF3H6S7amdomWJCc4e1e362f1"
+gh secret set CF_DNS_API_TOKEN --body "<CF_TOKEN from D:\Master-IA-Dev\00-GoogleCloud\004_Infra_in_VM\.env>"
 ```
 
 ## Output Format

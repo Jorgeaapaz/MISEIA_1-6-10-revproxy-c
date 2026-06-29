@@ -1,0 +1,42 @@
+# proxy.toml.example — copy to proxy.toml and fill in your backends
+# All keys shown; [global] is optional (defaults applied when omitted).
+
+[global]
+workers            = 0          # 0 = auto-detect CPU count; recommended: nproc
+connect_timeout_ms = 5000       # ms; backend connect deadline (1–60000)
+read_timeout_ms    = 30000      # ms; client header read deadline (1–120000)
+log_level          = "info"     # trace | debug | info | warn | error
+forwarded_for      = true       # true = inject X-Forwarded-For: <client-ip>
+
+# ── Listeners ────────────────────────────────────────────────────────────
+# At least one [[listener]] required.
+# Ports < 1024 require root or CAP_NET_BIND_SERVICE.
+
+[[listener]]
+port = 8080                     # TCP port (1–65535)
+
+# [[listener]]
+# port = 80
+
+# [[listener]]
+# port = 443
+
+# ── Routes ───────────────────────────────────────────────────────────────
+# At least one [[route]] required.
+# Precedence (high→low): exact > wildcard-subdomain > global (*)
+# Backends: "host:port" strings; round-robin across the list.
+
+[[route]]
+domain   = "api.example.com"           # exact match
+backends = [
+  "127.0.0.1:9001",                    # backend 1
+  "127.0.0.1:9002",                    # backend 2 (round-robin)
+]
+
+[[route]]
+domain   = "*.example.com"             # wildcard subdomain match
+backends = ["127.0.0.1:9003"]
+
+[[route]]
+domain   = "*"                          # global fallback (any unmatched domain)
+backends = ["127.0.0.1:9000"]

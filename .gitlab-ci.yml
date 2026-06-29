@@ -1,0 +1,106 @@
+stages:
+  - build
+  - test
+  - coverage
+  - package
+
+variables:
+  GIT_DEPTH: "10"
+
+# ── Build (Linux / epoll) ──────────────────────────────────────────────────
+
+build:linux:
+  stage: build
+  image: ubuntu:24.04
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y --no-install-recommends meson ninja-build gcc
+  script:
+    - meson setup builddir -Dbuildtype=release
+    - meson compile -C builddir
+  artifacts:
+    paths:
+      - builddir/proxy
+    expire_in: 1 hour
+
+# ── Tests + Coverage ───────────────────────────────────────────────────────
+
+test:linux:
+  stage: test
+  image: ubuntu:24.04
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y --no-install-recommends meson ninja-build gcc lcov
+  script:
+    - meson setup builddir-cov -Db_coverage=true -Dbuildtype=debug
+    - meson test -C builddir-cov --print-errorlogs
+  artifacts:
+    reports:
+      junit: builddir-cov/meson-logs/testlog.junit.xml
+    paths:
+      - builddir-cov/meson-logs/
+    expire_in: 1 day
+
+coverage:report:
+  stage: coverage
+  image: ubuntu:24.04
+  needs: [test:linux]
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y --no-install-recommends meson ninja-build gcc lcov
+  script:
+    - meson setup builddir-cov -Db_coverage=true -Dbuildtype=debug
+    - meson test -C builddir-cov
+    - ninja -C builddir-cov coverage-xml
+    - ninja -C builddir-cov coverage-html
+  coverage: '/lines[.]*: \d+\.\d+%/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: builddir-cov/meson-logs/coverage.xml
+    paths:
+      - builddir-cov/meson-logs/coveragereport/
+    expire_in: 7 days
+
+# ── Format Check ───────────────────────────────────────────────────────────
+
+lint:format:
+  stage: test
+  image: ubuntu:24.04
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y --no-install-recommends meson ninja-build gcc clang-format
+  script:
+    - meson setup builddir -Dbuildtype=debug
+    - meson compile -C builddir format-check
+
+# ── Cross-compile Windows ──────────────────────────────────────────────────
+
+build:windows:
+  stage: build
+  image: ubuntu:24.04
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y --no-install-recommends meson ninja-build gcc-mingw-w64-x86-64
+  script:
+    - |
+      cat > mingw64.ini << 'EOF'
+      [binaries]
+      c       = 'x86_64-w64-mingw32-gcc'
+      ar      = 'x86_64-w64-mingw32-ar'
+      strip   = 'x86_64-w64-mingw32-strip'
+      windres = 'x86_64-w64-mingw32-windres'
+
+      [host_machine]
+      system     = 'windows'
+      cpu_family = 'x86_64'
+      cpu        = 'x86_64'
+      endian     = 'little'
+      EOF
+    - meson setup builddir-win --cross-file mingw64.ini -Dbuildtype=release
+    - meson compile -C builddir-win
+  artifacts:
+    paths:
+      - builddir-win/proxy.exe
+    expire_in: 1 hour

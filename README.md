@@ -87,6 +87,36 @@ Two fixed-size buffers (`c2b_buf`, `b2c_buf`) with length and offset fields enab
 
 ---
 
+## Design Decisions
+
+Real architectural trade-offs made during implementation, including alternatives considered and reasons for each choice.
+
+### Decision 1 — epoll Edge-Triggered Mode (`EPOLLET`) vs. Level-Triggered (`EPOLLLT`)
+**Chose:** `EPOLLET` (edge-triggered) in `platform/epoll.c`  
+**Alternatives considered:** Level-triggered epoll (the default); `poll()`/`select()` for simplicity  
+**Why:** Level-triggered fires on every `epoll_wait` call while data remains available — under high concurrency with hundreds of active fds this generates redundant wakeups that waste CPU cycles. Edge-triggered fires exactly once per state change, forcing the worker to drain each fd completely to `EAGAIN`. This eliminates spurious wakeups at the cost of stricter application logic.  
+**Trade-off:** The worker loop *must* read in a loop until `EAGAIN` on every event; a single missed `EAGAIN` causes the fd to silently stop receiving events until the next state change. This makes the code more fragile — a partial-read bug becomes a hung connection, not a slow one.
+
+### Decision 2 — Lock-Free Round-Robin with `_Atomic int` vs. Mutex
+**Chose:** `atomic_fetch_add_explicit(&route->rr_index, 1, memory_order_relaxed)` in `balancer.c`  
+**Alternatives considered:** `pthread_mutex_t` guard around index increment; consistent hashing for sticky sessions  
+**Why:** A mutex would serialize all 32 worker threads on every backend selection — even a fast mutex adds ~50–100 ns of contention overhead per connection. `atomic_fetch_add` compiles to a single `LOCK XADD` CPU instruction with no thread blocking. Consistent hashing would have required re-hashing all active sessions on every backend change, which breaks the requirement that config reload must not interrupt active connections.  
+**Trade-off:** The counter wraps on overflow (guarded with `abs()`), so under an intense burst a single backend may receive one extra request before the cycle resets. Not strictly fair in microsecond windows, but statistically correct over any meaningful time period.
+
+### Decision 3 — RCU-Style Atomic Config Swap vs. Reader-Writer Lock
+**Chose:** `_Atomic(SharedState*)` pointer with `atomic_exchange` swap in `main.c`  
+**Alternatives considered:** `pthread_rwlock_t` (readers share, writer exclusive); stop-the-world reload (restart the process)  
+**Why:** A reader-writer lock adds a lock/unlock pair to every connection accept — on the hot path with thousands of connections per second, even a read lock has measurable overhead. The `_Atomic` pointer load is a single `MOV` with no synchronization overhead for readers. Restarting the process would drop all active connections, violating the requirement that reload must be transparent.  
+**Trade-off:** Old `SharedState` memory cannot be freed immediately — it must remain valid until all workers that loaded it before the swap have finished using it. This requires a grace-period or reference-count mechanism, adding lifecycle complexity that is absent with a mutex approach.
+
+### Decision 4 — Thread-Per-Core Worker Pool vs. Single-Threaded Event Loop
+**Chose:** N worker threads each owning their own `epoll` fd + `SO_REUSEPORT` on listener sockets  
+**Alternatives considered:** Single-threaded event loop (Node.js model); work-stealing thread pool with a shared `epoll` fd  
+**Why:** A single-threaded event loop saturates at one CPU core regardless of hardware. A shared `epoll` fd requires cross-thread fd migration when handing off accepted connections to workers — this adds latency and requires locking on the shared epoll instance. Thread-per-core eliminates both bottlenecks: `SO_REUSEPORT` lets the kernel distribute incoming connections across worker sockets at the NIC level without any userspace coordination, and each worker's private `epoll` fd has zero contention.  
+**Trade-off:** Higher baseline memory (each worker needs its own fd table, stack, and event buffer). The thundering-herd problem on `accept()` is real on older kernels, but `SO_REUSEPORT` with `SOCK_NONBLOCK` on Linux ≥ 3.9 routes new connections to exactly one socket, eliminating it.
+
+---
+
 ## How It Works
 
 On startup the proxy loads `proxy.toml`, builds a route lookup table, and creates listening sockets. Each worker thread enters an event loop; when a client connects, the HTTP `Host:` header is read, matched against the route table, and a backend is selected atomically. From that point the worker ferries bytes in both directions until one side closes, then tears down the connection.
@@ -150,6 +180,13 @@ git clone https://github.com/Jorgeaapaz/MISEIA_1-6-10-revproxy-c.git
 cd MISEIA_1-6-10-revproxy-c
 ```
 
+### Configure
+
+```bash
+cp proxy.toml.example proxy.toml
+# Edit proxy.toml to add your backends
+```
+
 ### Build
 
 ```bash
@@ -161,6 +198,16 @@ meson compile -C builddir
 
 # Run unit tests
 meson test -C builddir
+```
+
+### Code Style
+
+```bash
+# Format all source files in-place
+meson compile -C builddir format
+
+# Check formatting (CI-safe, exits non-zero if reformatting needed)
+meson compile -C builddir format-check
 ```
 
 Cross-compile for Windows from Linux using the provided MinGW cross-file:
@@ -191,6 +238,30 @@ bash tests/run_integration.sh
 
 # Windows (PowerShell, run as Administrator for hosts file access)
 .\tests\run_integration.ps1
+```
+
+### Docker Deploy
+
+```bash
+# Build the image
+docker build -t proxy-epoll-iocp:latest .
+
+# Run with your config
+docker run -d \
+  --name revproxy \
+  -p 8080:8080 \
+  -v $(pwd)/proxy.toml:/app/proxy.toml:ro \
+  proxy-epoll-iocp:latest
+
+# Deploy to GCI VM (requires SSH access)
+docker save proxy-epoll-iocp:latest | \
+  ssh -i ~/.ssh/vboxuser gcvmuser@34.174.56.186 "docker load"
+
+ssh -i ~/.ssh/vboxuser gcvmuser@34.174.56.186 \
+  "docker run -d --name revproxy --restart=unless-stopped \
+   --network miseia-net \
+   -v ~/proxy.toml:/app/proxy.toml:ro \
+   proxy-epoll-iocp:latest"
 ```
 
 ---
@@ -261,6 +332,12 @@ MIT
 
 - **`index.html`** — new self-contained HTML landing page describing the project: architecture diagram, key features, tech stack, quick-start guide, and buttons linking to both the GitHub (`https://github.com/Jorgeaapaz/MISEIA_1-6-10-revproxy-c`) and GitLab (`https://gitlab.codecrypto.academy/jorgeaapaz/MISEIA_1-6-10-revproxy-c`) repositories. Dark terminal aesthetic, no external CDN dependencies.
 - **`docs/prompts/feature_001_html_project_page_prompt.md`** — disciplined implementation prompt (feature 001) that drove the `index.html` creation, following the project's standard prompt template.
+
+---
+
+## AI Collaboration
+
+This project was built with [Claude Code](https://claude.ai/code) (Sonnet 4.6) as an AI assistant. See [`docs/AI_COLLABORATION.md`](docs/AI_COLLABORATION.md) for a module-by-module log of what the AI generated, what the developer changed, and the patterns of errors caught during review.
 
 ---
 

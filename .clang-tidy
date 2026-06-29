@@ -1,0 +1,14 @@
+Checks: >
+  clang-diagnostic-*,
+  clang-analyzer-*,
+  bugprone-*,
+  cert-*,
+  -cert-err33-c,
+  misc-*,
+  performance-*,
+  portability-*
+WarningsAsErrors: ''
+HeaderFilterRegex: '^src/|^platform/'
+CheckOptions:
+  - key: bugprone-easily-swappable-parameters.MinimumLength
+    value: '3'

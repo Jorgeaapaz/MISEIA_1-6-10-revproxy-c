@@ -25,3 +25,19 @@ endif
 # ── Subdirectories ──────────────────────────────────────────────────────────
 subdir('src')
 subdir('tests')
+
+# ── Code formatting (clang-format) ──────────────────────────────────────────
+clang_format = find_program('clang-format', required : false)
+if clang_format.found()
+  all_c_sources = files(
+    'src/main.c', 'src/config.c', 'src/router.c', 'src/balancer.c',
+    'src/dispatcher.c', 'src/listener.c', 'src/log.c', 'src/utils.c',
+    'platform/epoll.c',
+  )
+  run_target('format',
+    command : [clang_format, '--style=file', '-i', all_c_sources],
+  )
+  run_target('format-check',
+    command : [clang_format, '--style=file', '--dry-run', '--Werror', all_c_sources],
+  )
+endif

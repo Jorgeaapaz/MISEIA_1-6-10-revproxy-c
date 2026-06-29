@@ -2,7 +2,7 @@ FROM ubuntu:24.04 AS builder
 
 RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends \
-        meson ninja-build gcc pkg-config && \
+        meson ninja-build build-essential pkg-config && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
